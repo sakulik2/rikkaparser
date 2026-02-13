@@ -6,7 +6,7 @@
 
 ### 1. 浏览器版（推荐）
 
-直接打开 [`rikkahub_viewer.html`](rikkahub_viewer.html)，选择备份 zip 文件即可。
+直接打开 [`viewer.html`](viewer.html)，选择备份 zip 文件即可。
 
 - 手机 / 电脑 / 平板通用
 - 无需安装任何依赖
