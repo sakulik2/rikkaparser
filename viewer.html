@@ -1,0 +1,1346 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RikkaHub 对话浏览器</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
+    <style>
+        :root {
+            --bg: #f8f9fa;
+            --bg-secondary: #ffffff;
+            --bg-hover: #f0f0f5;
+            --text: #1a1a1a;
+            --text-muted: #6b7280;
+            --accent: #5b5fc7;
+            --accent-light: #7c7fff;
+            --user-bg: #e8eaff;
+            --assistant-bg: #ffffff;
+            --system-bg: #fef9ef;
+            --border: #e5e7eb;
+            --code-bg: #f3f4f6;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Upload screen */
+        .upload-screen {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100vh;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .upload-inner {
+            max-width: 420px;
+        }
+
+        .upload-inner h1 {
+            font-size: 1.4rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .upload-inner p {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin-bottom: 16px;
+        }
+
+        .upload-area {
+            border: 2px dashed var(--border);
+            border-radius: 12px;
+            padding: 40px 24px;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: var(--bg-secondary);
+        }
+
+        .upload-area:hover,
+        .upload-area.dragover {
+            border-color: var(--accent);
+            background: #f0f0ff;
+        }
+
+        .upload-area .icon {
+            font-size: 2.5rem;
+            margin-bottom: 8px;
+        }
+
+        .upload-area .label {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        .upload-area input {
+            display: none;
+        }
+
+        .progress-bar {
+            display: none;
+            margin-top: 16px;
+            height: 6px;
+            background: var(--border);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--accent);
+            border-radius: 3px;
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .status-text {
+            display: none;
+            margin-top: 10px;
+            font-size: 0.82rem;
+            color: var(--text-muted);
+        }
+
+        /* Sidebar */
+        .app-container {
+            display: none;
+            width: 100%;
+            height: 100vh;
+        }
+
+        .sidebar {
+            width: 280px;
+            min-width: 280px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            transition: transform 0.3s ease;
+        }
+
+        .sidebar-header {
+            padding: 16px 18px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .sidebar-header h2 {
+            font-size: 1.05rem;
+            font-weight: 600;
+            margin-bottom: 2px;
+        }
+
+        .conv-count {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .search-wrap {
+            margin: 10px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .search-box {
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: var(--bg);
+            color: var(--text);
+            font-size: 0.85rem;
+            outline: none;
+            width: 100%;
+        }
+
+        .search-box:focus {
+            border-color: var(--accent);
+        }
+
+        .search-mode-toggle {
+            display: flex;
+            gap: 0;
+            border-radius: 6px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+            font-size: 0.75rem;
+        }
+
+        .search-mode-btn {
+            flex: 1;
+            padding: 4px 0;
+            text-align: center;
+            cursor: pointer;
+            background: var(--bg);
+            color: var(--text-muted);
+            border: none;
+            transition: all 0.15s;
+        }
+
+        .search-mode-btn.active {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        .search-match-preview {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            margin-top: 2px;
+            line-height: 1.3;
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+
+        .search-match-preview mark {
+            background: #fde68a;
+            color: #1a1a1a;
+            border-radius: 2px;
+            padding: 0 1px;
+        }
+
+        .conv-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 6px;
+        }
+
+        .conv-item {
+            padding: 10px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.15s;
+            margin-bottom: 2px;
+        }
+
+        .conv-item:hover {
+            background: var(--bg-hover);
+        }
+
+        .conv-item.active {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        .conv-title {
+            font-size: 0.85rem;
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .conv-meta {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            margin-top: 3px;
+        }
+
+        .conv-item.active .conv-meta {
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .assistant-badge {
+            font-size: 0.65rem;
+            background: rgba(91, 95, 199, 0.15);
+            color: var(--accent);
+            padding: 1px 5px;
+            border-radius: 3px;
+            margin-left: 4px;
+        }
+
+        .conv-item.active .assistant-badge {
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+        }
+
+        /* Main */
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background: var(--bg);
+        }
+
+        .menu-btn {
+            display: none;
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            z-index: 100;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            color: var(--text);
+            font-size: 1.2rem;
+            padding: 5px 9px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .welcome {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+
+        .welcome-inner h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .welcome-inner p {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin-bottom: 4px;
+        }
+
+        .welcome-inner .hint {
+            margin-top: 16px;
+            font-size: 0.85rem;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 0.4
+            }
+
+            50% {
+                opacity: 1
+            }
+        }
+
+        /* Conv view */
+        .conv-view {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: none;
+        }
+
+        .conv-header {
+            max-width: 900px;
+            margin: 0 auto 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .conv-header h2 {
+            font-size: 1.15rem;
+            font-weight: 600;
+        }
+
+        .conv-info {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .messages {
+            max-width: 900px;
+            margin: 0 auto;
+            overflow-x: hidden;
+        }
+
+        /* Message */
+        .message {
+            margin-bottom: 16px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .message.user {
+            align-items: flex-end;
+        }
+
+        .message.assistant {
+            align-items: flex-start;
+        }
+
+        .message.system {
+            align-items: center;
+        }
+
+        .msg-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+
+        .role-label {
+            font-weight: 600;
+            font-size: 0.82rem;
+            color: var(--text);
+        }
+
+        .msg-meta {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+        }
+
+        .msg-body {
+            padding: 12px 16px;
+            border-radius: 10px;
+            line-height: 1.5;
+            font-size: 0.9rem;
+            word-break: break-word;
+            overflow: hidden;
+            min-width: 0;
+        }
+
+        .message.user .msg-body {
+            background: var(--user-bg);
+            border: 1px solid #d5d8ff;
+            max-width: 80%;
+            border-radius: 18px 18px 4px 18px;
+        }
+
+        .message.assistant .msg-body {
+            background: var(--assistant-bg);
+            border: 1px solid var(--border);
+            border-radius: 18px 18px 18px 4px;
+        }
+
+        .message.system .msg-body {
+            background: var(--system-bg);
+            border: 1px solid #f0e4c8;
+            font-style: italic;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            max-width: 90%;
+            text-align: center;
+        }
+
+        /* Parts */
+        .part-text p {
+            margin: 0 0 1px 0;
+        }
+
+        .part-text p:last-child {
+            margin-bottom: 0;
+        }
+
+        .part-text p:empty {
+            display: none;
+        }
+
+        .md-li {
+            padding: 0;
+            margin: 0;
+        }
+
+        .part-text h2,
+        .part-text h3,
+        .part-text h4,
+        .part-text h5,
+        .part-text h6 {
+            margin: 10px 0 4px;
+            font-size: 0.95rem;
+        }
+
+        .part-text h5,
+        .part-text h6 {
+            font-size: 0.88rem;
+        }
+
+        .part-text hr {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 12px 0;
+        }
+
+        .part-text blockquote {
+            border-left: 3px solid var(--accent);
+            padding: 4px 12px;
+            margin: 6px 0;
+            color: var(--text-muted);
+            background: #f5f5fa;
+            border-radius: 0 4px 4px 0;
+        }
+
+        .part-text del {
+            color: var(--text-muted);
+        }
+
+        .md-table-wrap {
+            overflow-x: auto;
+            margin: 8px 0;
+        }
+
+        .md-table-wrap table {
+            border-collapse: collapse;
+            font-size: 0.85rem;
+            width: 100%;
+        }
+
+        .md-table-wrap th,
+        .md-table-wrap td {
+            border: 1px solid var(--border);
+            padding: 6px 10px;
+            text-align: left;
+        }
+
+        .md-table-wrap th {
+            background: var(--bg);
+            font-weight: 600;
+        }
+
+        .part-text code {
+            background: var(--code-bg);
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-size: 0.85em;
+            font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+            color: #d63384;
+        }
+
+        .part-text pre {
+            background: #1e1e2e;
+            color: #cdd6f4;
+            padding: 12px;
+            border-radius: 6px;
+            overflow-x: auto;
+            margin: 8px 0;
+            max-width: 100%;
+        }
+
+        .part-text pre code {
+            background: none;
+            padding: 0;
+            font-size: 0.82rem;
+            line-height: 1.5;
+            color: inherit;
+        }
+
+        .part-text a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .part-text a:hover {
+            text-decoration: underline;
+        }
+
+        .part-image img {
+            max-width: 360px;
+            max-height: 360px;
+            border-radius: 6px;
+            margin: 6px 0;
+        }
+
+        .part-file,
+        .file-ref {
+            color: var(--text-muted);
+            font-size: 0.82rem;
+            padding: 4px 0;
+        }
+
+        /* Citations */
+        .citations {
+            margin: 6px 0;
+            border: 1px solid #d1fae5;
+            border-radius: 6px;
+            overflow: hidden;
+            background: #f0fdf4;
+        }
+
+        .citations summary {
+            padding: 7px 12px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: #059669;
+            user-select: none;
+        }
+
+        .citations summary:hover {
+            background: #ecfdf5;
+        }
+
+        .citations-list {
+            padding: 4px 12px 8px;
+        }
+
+        .citations-list .annotation {
+            padding: 3px 0;
+            font-size: 0.8rem;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .citations-list .annotation:last-child {
+            border-bottom: none;
+        }
+
+        .citations-list .annotation a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .citations-list .annotation a:hover {
+            text-decoration: underline;
+        }
+
+        /* Reasoning */
+        .reasoning {
+            margin: 6px 0;
+            border: 1px solid #e0dff8;
+            border-radius: 6px;
+            overflow: hidden;
+            background: #fafaff;
+        }
+
+        .reasoning summary {
+            padding: 7px 12px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--accent);
+            user-select: none;
+        }
+
+        .reasoning summary:hover {
+            background: #f0f0ff;
+        }
+
+        .reasoning-content {
+            padding: 8px 12px;
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            line-height: 1.6;
+            max-height: 400px;
+            overflow-y: auto;
+            border-top: 1px solid #e0dff8;
+        }
+
+        /* Tool */
+        .tool-call {
+            margin: 6px 0;
+            border: 1px solid #dbeafe;
+            border-radius: 6px;
+            overflow: hidden;
+            background: #f8faff;
+        }
+
+        .tool-call summary {
+            padding: 7px 12px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: #3b82f6;
+            user-select: none;
+        }
+
+        .tool-call summary:hover {
+            background: #eff6ff;
+        }
+
+        .tool-body {
+            padding: 8px 12px;
+        }
+
+        .tool-input {
+            background: var(--code-bg);
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 0.78rem;
+            overflow-x: auto;
+            margin-bottom: 6px;
+            font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .tool-output {
+            border-top: 1px solid #dbeafe;
+            padding-top: 6px;
+            font-size: 0.82rem;
+        }
+
+        .translation {
+            margin-top: 8px;
+            padding: 8px 10px;
+            background: #fffbeb;
+            border: 1px solid #fde68a;
+            border-radius: 4px;
+            font-size: 0.82rem;
+            color: #92400e;
+        }
+
+        .annotation {
+            margin-top: 4px;
+            font-size: 0.8rem;
+        }
+
+        .annotation a {
+            color: var(--accent);
+        }
+
+        ::-webkit-scrollbar {
+            width: 5px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #d1d5db;
+            border-radius: 3px;
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                position: fixed;
+                left: 0;
+                top: 0;
+                z-index: 50;
+                transform: translateX(-100%);
+            }
+
+            .sidebar.open {
+                transform: translateX(0);
+            }
+
+            .menu-btn {
+                display: block;
+            }
+
+            .conv-view {
+                padding: 12px;
+                padding-top: 44px;
+            }
+
+            .message.user .msg-body {
+                max-width: 90%;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Upload Screen -->
+    <div class="upload-screen" id="uploadScreen">
+        <div class="upload-inner">
+            <h1>📱 RikkaHub 对话浏览器</h1>
+            <p>选择 RikkaHub 备份 zip 文件，在浏览器中直接解析查看</p>
+            <div class="upload-area" id="uploadArea">
+                <div class="icon">📦</div>
+                <div class="label">点击选择或拖拽 zip 文件到此处</div>
+                <input type="file" id="fileInput" accept=".zip">
+            </div>
+            <div class="progress-bar" id="progressBar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div class="status-text" id="statusText"></div>
+        </div>
+    </div>
+
+    <!-- App Container (hidden until file loaded) -->
+    <div class="app-container" id="appContainer">
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h2>🗂️ RikkaHub 对话</h2>
+                <span class="conv-count" id="convCount"></span>
+            </div>
+            <div class="search-wrap">
+                <input type="text" class="search-box" id="searchBox" placeholder="🔍 搜索对话..."
+                    oninput="filterConversations()">
+                <div class="search-mode-toggle">
+                    <button class="search-mode-btn active" data-mode="title"
+                        onclick="setSearchMode('title')">标题搜索</button>
+                    <button class="search-mode-btn" data-mode="content" onclick="setSearchMode('content')">全文搜索</button>
+                </div>
+            </div>
+            <div class="conv-list" id="convList"></div>
+        </div>
+        <div class="main" id="main">
+            <button class="menu-btn" onclick="toggleSidebar()">☰</button>
+            <div class="welcome" id="welcome">
+                <div class="welcome-inner">
+                    <h1>📱 RikkaHub 对话浏览器</h1>
+                    <p id="welcomeInfo"></p>
+                    <p class="hint">← 从左侧选择一个对话开始浏览</p>
+                </div>
+            </div>
+            <div class="conv-view" id="convView"></div>
+        </div>
+    </div>
+
+    <script>
+        // ─── Globals ───
+        let conversations = [];
+        let assistants = {};
+        let currentConv = -1;
+
+        // ─── Upload Handling ───
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const progressBar = document.getElementById('progressBar');
+        const progressFill = document.getElementById('progressFill');
+        const statusText = document.getElementById('statusText');
+
+        uploadArea.addEventListener('click', () => fileInput.click());
+        uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+        uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+        uploadArea.addEventListener('drop', e => { e.preventDefault(); uploadArea.classList.remove('dragover'); if (e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]); });
+        fileInput.addEventListener('change', e => { if (e.target.files[0]) processFile(e.target.files[0]); });
+
+        function setStatus(msg, pct) {
+            statusText.style.display = 'block';
+            statusText.textContent = msg;
+            if (pct !== undefined) {
+                progressBar.style.display = 'block';
+                progressFill.style.width = pct + '%';
+            }
+        }
+
+        async function processFile(file) {
+            try {
+                setStatus('正在读取 zip 文件...', 10);
+                const arrayBuffer = await file.arrayBuffer();
+
+                setStatus('正在解压...', 30);
+                const zip = await JSZip.loadAsync(arrayBuffer);
+
+                // Find settings.json
+                let settings = null;
+                const settingsFile = zip.file('settings.json');
+                if (settingsFile) {
+                    setStatus('正在读取设置...', 40);
+                    const settingsText = await settingsFile.async('string');
+                    settings = JSON.parse(settingsText);
+                }
+
+                // Extract assistants
+                if (settings && settings.assistants) {
+                    for (const a of settings.assistants) {
+                        assistants[a.id || ''] = a.name || '默认助手';
+                    }
+                }
+
+                // Find database
+                const dbFile = zip.file('rikka_hub.db');
+                if (!dbFile) {
+                    setStatus('❌ 未找到 rikka_hub.db');
+                    return;
+                }
+
+                setStatus('正在加载数据库引擎...', 50);
+                const SQL = await initSqlJs({
+                    locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${f}`
+                });
+
+                setStatus('正在读取数据库...', 60);
+                const dbData = await dbFile.async('uint8array');
+                const db = new SQL.Database(dbData);
+
+                setStatus('正在解析对话...', 70);
+                conversations = readConversations(db);
+
+                setStatus('正在读取记忆...', 85);
+                const memories = readMemories(db);
+                db.close();
+
+                setStatus('完成！', 100);
+
+                // Show app
+                setTimeout(() => {
+                    document.getElementById('uploadScreen').style.display = 'none';
+                    document.getElementById('appContainer').style.display = 'flex';
+                    renderSidebar(memories);
+                }, 300);
+
+            } catch (e) {
+                setStatus('❌ 解析失败: ' + e.message);
+                console.error(e);
+            }
+        }
+
+        // ─── Database Reading ───
+        function readConversations(db) {
+            const convs = [];
+            const rows = db.exec(
+                "SELECT id, assistant_id, title, create_at, update_at, is_pinned " +
+                "FROM ConversationEntity ORDER BY update_at DESC"
+            );
+            if (!rows.length) return convs;
+
+            for (const row of rows[0].values) {
+                const [id, assistant_id, title, create_at, update_at, is_pinned] = row;
+                const conv = {
+                    id, assistant_id,
+                    title: title || '(无标题)',
+                    create_at: epochMsToStr(create_at),
+                    update_at: epochMsToStr(update_at),
+                    is_pinned: !!is_pinned,
+                    messages: []
+                };
+
+                const nodeRows = db.exec(
+                    "SELECT messages, select_index FROM message_node " +
+                    "WHERE conversation_id = ? ORDER BY node_index ASC",
+                    [id]
+                );
+                if (nodeRows.length) {
+                    for (const nrow of nodeRows[0].values) {
+                        const [messagesJson, selectIndex] = nrow;
+                        try {
+                            const messages = JSON.parse(messagesJson);
+                            if (!messages || !messages.length) continue;
+                            const idx = (selectIndex >= 0 && selectIndex < messages.length) ? selectIndex : 0;
+                            const parsed = parseUIMessage(messages[idx]);
+                            parsed.branch_count = messages.length;
+                            parsed.branch_index = idx;
+                            conv.messages.push(parsed);
+                        } catch (e) { }
+                    }
+                }
+                convs.push(conv);
+            }
+            return convs;
+        }
+
+        function readMemories(db) {
+            try {
+                const rows = db.exec("SELECT id, assistant_id, content FROM MemoryEntity");
+                if (!rows.length) return [];
+                return rows[0].values.map(r => ({ id: r[0], assistant_id: r[1], content: r[2] }));
+            } catch (e) { return []; }
+        }
+
+        function parseUIMessage(msg) {
+            const parts = [];
+            for (const p of (msg.parts || [])) {
+                const parsed = parseMessagePart(p);
+                if (parsed) parts.push(parsed);
+            }
+
+            const annotations = [];
+            for (const ann of (msg.annotations || [])) {
+                if (ann.type === 'url_citation') {
+                    annotations.push({ type: 'url_citation', title: ann.title || '', url: ann.url || '' });
+                }
+            }
+
+            let usage = null;
+            if (msg.usage) {
+                usage = {
+                    prompt_tokens: msg.usage.promptTokens || msg.usage.prompt_tokens || 0,
+                    completion_tokens: msg.usage.completionTokens || msg.usage.completion_tokens || 0,
+                    total_tokens: msg.usage.totalTokens || msg.usage.total_tokens || 0
+                };
+            }
+
+            return {
+                role: msg.role || 'unknown',
+                parts, annotations, usage,
+                created_at: msg.createdAt || '',
+                model_id: msg.modelId || null,
+                translation: msg.translation || null
+            };
+        }
+
+        function parseMessagePart(part) {
+            const t = part.type || '';
+
+            if (t === 'me.rerere.ai.ui.UIMessagePart.Text' || ('text' in part && !('reasoning' in part) && !('toolCallId' in part) && !('toolName' in part) && !('url' in part) && !('fileName' in part))) {
+                return { type: 'text', text: part.text || '' };
+            }
+            if (t === 'me.rerere.ai.ui.UIMessagePart.Reasoning' || 'reasoning' in part) {
+                return { type: 'reasoning', text: part.reasoning || '' };
+            }
+            if (t === 'me.rerere.ai.ui.UIMessagePart.Image' || ('url' in part && !('fileName' in part) && !('toolCallId' in part) && !('reasoning' in part))) {
+                if ('toolCallId' in part || 'toolName' in part || 'reasoning' in part) return null;
+                return { type: 'image', url: part.url || '' };
+            }
+            if (t === 'me.rerere.ai.ui.UIMessagePart.Document' || 'fileName' in part) {
+                return { type: 'document', url: part.url || '', file_name: part.fileName || '', mime: part.mime || '' };
+            }
+            if (t === 'me.rerere.ai.ui.UIMessagePart.Video') return { type: 'video', url: part.url || '' };
+            if (t === 'me.rerere.ai.ui.UIMessagePart.Audio') return { type: 'audio', url: part.url || '' };
+            if (t === 'me.rerere.ai.ui.UIMessagePart.Tool' || 'toolCallId' in part) {
+                const outputParts = [];
+                for (const op of (part.output || [])) {
+                    const parsed = parseMessagePart(op);
+                    if (parsed) outputParts.push(parsed);
+                }
+                return { type: 'tool', tool_call_id: part.toolCallId || '', tool_name: part.toolName || '', input: part.input || '', output: outputParts };
+            }
+            if ('text' in part && typeof part.text === 'string') return { type: 'text', text: part.text };
+            return null;
+        }
+
+        function epochMsToStr(ms) {
+            if (!ms) return '';
+            try {
+                const d = new Date(ms);
+                return d.getFullYear() + '-' +
+                    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                    String(d.getDate()).padStart(2, '0') + ' ' +
+                    String(d.getHours()).padStart(2, '0') + ':' +
+                    String(d.getMinutes()).padStart(2, '0') + ':' +
+                    String(d.getSeconds()).padStart(2, '0');
+            } catch (e) { return String(ms); }
+        }
+
+        // ─── Markdown Renderer ───
+        function esc(s) {
+            const div = document.createElement('div');
+            div.textContent = s;
+            return div.innerHTML;
+        }
+
+        function inlineFormat(text) {
+            // Protect code spans
+            const codeSpans = [];
+            text = text.replace(/`([^`]+)`/g, (_, c) => { codeSpans.push(c); return '\x00C' + (codeSpans.length - 1) + '\x00'; });
+            // Images
+            text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width:360px;border-radius:6px">');
+            // Links
+            text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+            // Bold-italic
+            text = text.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+            // Bold
+            text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            text = text.replace(/__(.+?)__/g, '<strong>$1</strong>');
+            // Strikethrough
+            text = text.replace(/~~(.+?)~~/g, '<del>$1</del>');
+            // Italic (single * not adjacent to **)
+            text = text.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
+            // Restore code
+            for (let i = 0; i < codeSpans.length; i++) {
+                text = text.replace('\x00C' + i + '\x00', '<code>' + codeSpans[i] + '</code>');
+            }
+            return text;
+        }
+
+        function simpleMarkdown(text) {
+            const lines = text.split('\n');
+            const result = [];
+            let inCode = false, codeLang = '', codeLines = [];
+            let inTable = false, tableRows = [];
+
+            function flushTable() {
+                if (!tableRows.length) return;
+                let html = '<div class="md-table-wrap"><table>';
+                for (let ri = 0; ri < tableRows.length; ri++) {
+                    let cells = tableRows[ri].split('|').map(c => c.trim());
+                    if (cells[0] === '') cells.shift();
+                    if (cells[cells.length - 1] === '') cells.pop();
+                    if (cells.every(c => c.replace(/[-:]/g, '') === '')) continue;
+                    const tag = ri === 0 ? 'th' : 'td';
+                    html += '<tr>' + cells.map(c => `<${tag}>${inlineFormat(esc(c))}</${tag}>`).join('') + '</tr>';
+                }
+                html += '</table></div>';
+                result.push(html);
+                tableRows = [];
+                inTable = false;
+            }
+
+            for (const line of lines) {
+                const stripped = line.trim();
+
+                if (stripped.startsWith('```')) {
+                    if (inTable) flushTable();
+                    if (inCode) {
+                        result.push(`<pre><code class="lang-${esc(codeLang)}">${esc(codeLines.join('\n'))}</code></pre>`);
+                        codeLines = [];
+                        inCode = false;
+                    } else {
+                        codeLang = stripped.slice(3).trim();
+                        inCode = true;
+                    }
+                    continue;
+                }
+                if (inCode) { codeLines.push(line); continue; }
+
+                // Table
+                if (stripped.includes('|') && stripped.startsWith('|')) {
+                    if (!inTable) { inTable = true; tableRows = []; }
+                    tableRows.push(stripped);
+                    continue;
+                } else if (inTable) { flushTable(); }
+
+                // Horizontal rule
+                if (/^(\s*[-*_]\s*){3,}$/.test(stripped)) { result.push('<hr>'); continue; }
+
+                // Heading
+                const hm = line.match(/^(#{1,6})\s+(.+)$/);
+                if (hm) {
+                    const lvl = Math.min(hm[1].length + 1, 6);
+                    result.push(`<h${lvl}>${inlineFormat(esc(hm[2]))}</h${lvl}>`);
+                    continue;
+                }
+
+                // Empty line - skip
+                if (!stripped) continue;
+
+                // Blockquote
+                if (stripped.startsWith('> ')) {
+                    result.push(`<blockquote>${inlineFormat(esc(stripped.slice(2)))}</blockquote>`);
+                    continue;
+                }
+                if (stripped === '>') { result.push('<blockquote></blockquote>'); continue; }
+
+                const escaped = esc(line);
+                const formatted = inlineFormat(escaped);
+
+                // Unordered list
+                const ulm = line.match(/^(\s*)([-*+])\s+(.+)$/);
+                if (ulm) {
+                    const margin = ulm[1].length * 12;
+                    result.push(`<div class="md-li" style="margin-left:${margin}px">• ${inlineFormat(esc(ulm[3]))}</div>`);
+                    continue;
+                }
+
+                // Ordered list
+                const olm = line.match(/^(\s*)(\d+)[.)]\s+(.+)$/);
+                if (olm) {
+                    const margin = olm[1].length * 12;
+                    result.push(`<div class="md-li" style="margin-left:${margin}px">${olm[2]}. ${inlineFormat(esc(olm[3]))}</div>`);
+                    continue;
+                }
+
+                result.push(`<p>${formatted}</p>`);
+            }
+
+            if (inCode && codeLines.length) result.push(`<pre><code>${esc(codeLines.join('\n'))}</code></pre>`);
+            if (inTable) flushTable();
+            return result.join('\n');
+        }
+
+        // ─── Rendering ───
+        function renderPart(part) {
+            const t = part.type;
+            if (t === 'text') {
+                const text = part.text || '';
+                if (!text.trim()) return '';
+                return `<div class="part-text">${simpleMarkdown(text)}</div>`;
+            }
+            if (t === 'reasoning') {
+                const text = part.text || '';
+                if (!text.trim()) return '';
+                return `<details class="reasoning"><summary>💭 思考过程</summary><div class="reasoning-content">${simpleMarkdown(text)}</div></details>`;
+            }
+            if (t === 'image') {
+                const url = part.url || '';
+                if (url.startsWith('data:')) return `<div class="part-image"><img src="${url}" alt="image" loading="lazy"></div>`;
+                return `<div class="part-image"><span class="file-ref">🖼️ 图片: ${esc(url)}</span></div>`;
+            }
+            if (t === 'document') return `<div class="part-file">📄 ${esc(part.file_name || '文档')} <span style="color:var(--text-muted)">${esc(part.mime || '')}</span></div>`;
+            if (t === 'video') return `<div class="part-file">🎬 视频: ${esc(part.url || '')}</div>`;
+            if (t === 'audio') return `<div class="part-file">🔊 音频: ${esc(part.url || '')}</div>`;
+            if (t === 'tool') {
+                const friendlyNames = { memory_tool: '🧠 记忆操作', search_web: '🔍 网页搜索', scrape_web: '🌐 网页抓取' };
+                const name = friendlyNames[part.tool_name] || `🔧 ${part.tool_name}`;
+                let inputDisplay = part.input || '';
+                try { inputDisplay = JSON.stringify(JSON.parse(inputDisplay), null, 2); } catch (e) { }
+                let outputHtml = '';
+                if (part.output && part.output.length) {
+                    outputHtml = `<div class="tool-output"><strong>输出:</strong>${part.output.map(renderPart).join('')}</div>`;
+                }
+                return `<details class="tool-call"><summary>${name}</summary><div class="tool-body"><pre class="tool-input">${esc(inputDisplay)}</pre>${outputHtml}</div></details>`;
+            }
+            return '';
+        }
+
+        function renderSidebar(memories) {
+            document.getElementById('convCount').textContent = `${conversations.length} 条对话`;
+            document.getElementById('welcomeInfo').textContent = `共 ${conversations.length} 条对话记录` + (memories.length ? ` · 🧠 ${memories.length} 条 AI 记忆` : '');
+
+            const list = document.getElementById('convList');
+            list.innerHTML = '';
+            for (let i = 0; i < conversations.length; i++) {
+                const conv = conversations[i];
+                const pin = conv.is_pinned ? ' 📌' : '';
+                const aName = assistants[conv.assistant_id] || '';
+                const badge = aName ? ` <span class="assistant-badge">${esc(aName)}</span>` : '';
+                const item = document.createElement('div');
+                item.className = 'conv-item';
+                item.dataset.index = i;
+                item.dataset.title = conv.title;
+                item.onclick = () => showConversation(i);
+                item.innerHTML = `<div class="conv-title">${pin}${esc(conv.title)}${badge}</div><div class="conv-meta">${conv.update_at} · ${conv.messages.length} 条消息</div>`;
+                list.appendChild(item);
+            }
+        }
+
+        function showConversation(index) {
+            const conv = conversations[index];
+            if (!conv) return;
+            currentConv = index;
+
+            // Update sidebar
+            document.querySelectorAll('.conv-item').forEach(el => el.classList.toggle('active', parseInt(el.dataset.index) === index));
+
+            // Hide welcome, show conv view
+            document.getElementById('welcome').style.display = 'none';
+            const view = document.getElementById('convView');
+            view.style.display = 'block';
+
+            const roleLabels = { user: '👤 User', assistant: '🤖 Assistant', system: '⚙️ System' };
+            const pin = conv.is_pinned ? '📌 ' : '';
+
+            let html = `<div class="conv-header"><h2>${pin}${esc(conv.title)}</h2><div class="conv-info">创建: ${conv.create_at} · 更新: ${conv.update_at} · ${conv.messages.length} 条消息</div></div><div class="messages">`;
+
+            for (const msg of conv.messages) {
+                const role = (msg.role || '').toLowerCase();
+                const label = roleLabels[role] || msg.role;
+                const extras = [];
+                if (msg.created_at) extras.push(String(msg.created_at));
+                if ((msg.branch_count || 1) > 1) extras.push(`分支 ${msg.branch_index + 1}/${msg.branch_count}`);
+                if (msg.usage && msg.usage.total_tokens) extras.push(`${msg.usage.total_tokens} tokens`);
+
+                html += `<div class="message ${role}"><div class="msg-header"><span class="role-label">${label}</span>`;
+                if (extras.length) html += `<span class="msg-meta">${extras.join(' · ')}</span>`;
+                html += `</div><div class="msg-body">`;
+                for (const part of msg.parts.filter(p => p.type !== 'reasoning')) html += renderPart(part);
+                for (const part of msg.parts.filter(p => p.type === 'reasoning')) html += renderPart(part);
+                if (msg.translation) html += `<div class="translation"><strong>翻译:</strong> ${esc(msg.translation)}</div>`;
+                const citations = (msg.annotations || []).filter(a => a.type === 'url_citation');
+                if (citations.length) {
+                    html += `<details class="citations"><summary>🔗 ${citations.length} 条引用</summary><div class="citations-list">`;
+                    for (const ann of citations) html += `<div class="annotation"><a href="${esc(ann.url)}" target="_blank">${esc(ann.title || ann.url)}</a></div>`;
+                    html += '</div></details>';
+                }
+                html += `</div></div>`;
+            }
+            html += '</div>';
+            view.innerHTML = html;
+            view.scrollTop = 0;
+
+            // Close sidebar on mobile
+            if (window.innerWidth <= 768) document.getElementById('sidebar').classList.remove('open');
+        }
+
+        let searchMode = 'title';
+
+        function setSearchMode(mode) {
+            searchMode = mode;
+            document.querySelectorAll('.search-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+            filterConversations();
+        }
+
+        function filterConversations() {
+            const q = document.getElementById('searchBox').value.toLowerCase().trim();
+            if (!q) {
+                // 清空时恢复所有项，移除预览
+                document.querySelectorAll('.conv-item').forEach(el => {
+                    el.style.display = '';
+                    const preview = el.querySelector('.search-match-preview');
+                    if (preview) preview.remove();
+                });
+                return;
+            }
+
+            document.querySelectorAll('.conv-item').forEach(el => {
+                const idx = parseInt(el.dataset.index);
+                const conv = conversations[idx];
+                // 移除旧的预览
+                const oldPreview = el.querySelector('.search-match-preview');
+                if (oldPreview) oldPreview.remove();
+
+                // 标题搜索
+                const titleMatch = (el.dataset.title || '').toLowerCase().includes(q);
+
+                if (searchMode === 'title') {
+                    el.style.display = titleMatch ? '' : 'none';
+                    return;
+                }
+
+                // 全文搜索：搜索所有消息内容
+                let contentMatch = null;
+                if (conv && conv.messages) {
+                    for (const msg of conv.messages) {
+                        for (const part of msg.parts) {
+                            const text = part.text || part.reasoning || '';
+                            const lowerText = text.toLowerCase();
+                            const matchIdx = lowerText.indexOf(q);
+                            if (matchIdx !== -1) {
+                                // 提取上下文
+                                const start = Math.max(0, matchIdx - 30);
+                                const end = Math.min(text.length, matchIdx + q.length + 30);
+                                let ctx = text.substring(start, end).replace(/\n/g, ' ');
+                                if (start > 0) ctx = '...' + ctx;
+                                if (end < text.length) ctx += '...';
+                                const roleIcon = { user: '👤', assistant: '🤖', system: '⚙️' }[msg.role?.toLowerCase()] || '❓';
+                                contentMatch = { ctx, roleIcon, matchIdx: matchIdx - start + (start > 0 ? 3 : 0) };
+                                break;
+                            }
+                        }
+                        if (contentMatch) break;
+                    }
+                }
+
+                if (titleMatch || contentMatch) {
+                    el.style.display = '';
+                    // 显示匹配预览
+                    if (contentMatch) {
+                        const preview = document.createElement('div');
+                        preview.className = 'search-match-preview';
+                        // 高亮关键词
+                        const raw = contentMatch.ctx;
+                        const re = new RegExp('(' + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+                        const highlighted = esc(raw).replace(re, '<mark>$1</mark>');
+                        preview.innerHTML = `${contentMatch.roleIcon} ${highlighted}`;
+                        el.appendChild(preview);
+                    }
+                } else {
+                    el.style.display = 'none';
+                }
+            });
+        }
+
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('open');
+        }
+
+        // Keyboard nav
+        document.addEventListener('keydown', e => {
+            if (e.target.tagName === 'INPUT') return;
+            const items = [...document.querySelectorAll('.conv-item:not([style*="display: none"])')];
+            if (!items.length) return;
+            let idx = items.findIndex(el => el.classList.contains('active'));
+            if (e.key === 'ArrowDown' || e.key === 'j') {
+                e.preventDefault();
+                idx = Math.min(idx + 1, items.length - 1);
+                showConversation(parseInt(items[idx].dataset.index));
+                items[idx].scrollIntoView({ block: 'nearest' });
+            } else if (e.key === 'ArrowUp' || e.key === 'k') {
+                e.preventDefault();
+                idx = Math.max(idx - 1, 0);
+                showConversation(parseInt(items[idx].dataset.index));
+                items[idx].scrollIntoView({ block: 'nearest' });
+            }
+        });
+    </script>
+</body>
+
+</html>
