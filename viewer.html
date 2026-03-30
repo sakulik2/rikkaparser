@@ -287,6 +287,17 @@
             color: #fff;
         }
 
+        /* Open-WebUI 来源徽章：绿色 */
+        .owui-badge {
+            background: rgba(16, 163, 127, 0.12);
+            color: #10a37f;
+        }
+
+        .conv-item.active .owui-badge {
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+        }
+
         /* Main */
         .main {
             flex: 1;
@@ -768,7 +779,7 @@
                 <div class="icon">📦</div>
                 <div class="label">点击选择或拖拽文件到此处<br><span style="font-size:0.78rem;opacity:0.7">支持 .zip（RikkaHub）或 .md（Gemini Voyager，可多选）</span></div>
                 <!-- multiple 允许同时选取多个 .md 文件 -->
-                <input type="file" id="fileInput" accept=".zip,.md" multiple>
+                <input type="file" id="fileInput" accept=".zip,.md,.json" multiple>
             </div>
             <div class="progress-bar" id="progressBar">
                 <div class="progress-fill" id="progressFill"></div>
@@ -849,10 +860,14 @@
             const files = Array.from(fileList);
             const zipFile = files.find(f => f.name.toLowerCase().endsWith('.zip'));
             const mdFiles = files.filter(f => f.name.toLowerCase().endsWith('.md'));
+            const jsonFiles = files.filter(f => f.name.toLowerCase().endsWith('.json'));
 
             if (zipFile) {
-                // RikkaHub 备份：优先处理 zip，忽略同批次 .md
+                // RikkaHub 备份：优先处理 zip，忽略同批次 .md/.json
                 await processZipFile(zipFile);
+            } else if (jsonFiles.length > 0) {
+                // Open-WebUI 导出：JSON 文件（可多文件合并）
+                await processOpenWebUIJsonFiles(jsonFiles);
             } else if (mdFiles.length > 0) {
                 // Gemini Voyager 导出：可多文件
                 await processMarkdownFiles(mdFiles);
@@ -925,6 +940,155 @@
                 setStatus('❌ 解析失败: ' + e.message);
                 console.error(e);
             }
+        }
+
+        // ─── Open-WebUI JSON 解析 ───
+
+        /**
+         * 读取一批 Open-WebUI 导出 JSON 文件，合并所有对话后渲染。
+         * Open-WebUI 每次导出的文件是一个数组，多文件直接拼接。
+         */
+        async function processOpenWebUIJsonFiles(files) {
+            try {
+                conversations = [];
+                assistants = {};
+                let total = 0;
+                for (let i = 0; i < files.length; i++) {
+                    setStatus(`正在读取 ${files[i].name}...`, Math.round(10 + 70 * i / files.length));
+                    const text = await files[i].text();
+                    const parsed = parseOpenWebUIExport(text);
+                    conversations.push(...parsed);
+                    total += parsed.length;
+                }
+                // 按更新时间降序排列
+                conversations.sort((a, b) => (b.update_ts || 0) - (a.update_ts || 0));
+
+                setStatus('完成！', 100);
+                setTimeout(() => {
+                    document.getElementById('uploadScreen').style.display = 'none';
+                    document.getElementById('appContainer').style.display = 'flex';
+                    renderSidebar([]);
+                }, 300);
+            } catch (e) {
+                setStatus('❌ 解析失败: ' + e.message);
+                console.error(e);
+            }
+        }
+
+        /**
+         * 解析 Open-WebUI 导出 JSON（数组格式），返回统一的对话数组。
+         *
+         * 导出格式摘要：
+         *   [{
+         *     id, title, pinned, created_at, updated_at,
+         *     chat: {
+         *       title, models,
+         *       history: {
+         *         currentId: "<末尾消息 ID>",
+         *         messages: { "<id>": { id, parentId, childrenIds, role, content, timestamp, model, usage } }
+         *       }
+         *     }
+         *   }, ...]
+         *
+         * 消息树通过 parentId 链接；沿 currentId→parentId 回溯即当前分支。
+         * 助手消息内容可能包含 <details type="reasoning"> 推理块，需拆分为 reasoning part。
+         */
+        function parseOpenWebUIExport(text) {
+            let data;
+            try { data = JSON.parse(text); } catch (e) { throw new Error('JSON 解析失败: ' + e.message); }
+            if (!Array.isArray(data)) throw new Error('不是 Open-WebUI 导出格式（需要数组）');
+            return data.map(item => {
+                try { return parseOpenWebUIConversation(item); }
+                catch (e) { console.warn('跳过无效对话:', item?.id, e.message); return null; }
+            }).filter(Boolean);
+        }
+
+        /**
+         * 解析单条 Open-WebUI 对话。
+         * 从 currentId 沿 parentId 回溯重建当前分支的消息列表。
+         */
+        function parseOpenWebUIConversation(item) {
+            const chat = item.chat || {};
+            const history = chat.history || {};
+            const msgMap = history.messages || {};
+            const currentId = history.currentId;
+
+            // 沿 parentId 回溯至根节点，再反转即正序
+            const chain = [];
+            let mid = currentId;
+            const visited = new Set();
+            while (mid && !visited.has(mid)) {
+                visited.add(mid);
+                const m = msgMap[mid];
+                if (!m) break;
+                chain.push(m);
+                mid = m.parentId || null;
+            }
+            chain.reverse();
+
+            // Open-WebUI 使用秒级时间戳
+            const createdTs = (item.created_at || chat.timestamp || 0) * 1000;
+            const updatedTs = (item.updated_at || item.created_at || 0) * 1000;
+
+            return {
+                id: item.id || '',
+                title: item.title || chat.title || '(无标题)',
+                create_at: epochMsToStr(createdTs),
+                update_at: epochMsToStr(updatedTs),
+                update_ts: updatedTs,   // 用于排序
+                is_pinned: !!item.pinned,
+                source_type: 'openwebui',
+                assistant_id: null,
+                // 保留模型名用于徽章显示
+                models: chat.models || [],
+                messages: chain.map(parseOpenWebUIMessage),
+            };
+        }
+
+        /**
+         * 解析单条 Open-WebUI 消息。
+         * 将正文中的 <details type="reasoning"> 块提取为独立的 reasoning part，
+         * 其余内容作为 text part，保持与 RikkaHub 消息结构一致。
+         */
+        function parseOpenWebUIMessage(m) {
+            const role = m.role || 'user';
+            let content = m.content || '';
+            const parts = [];
+            const reasoningTexts = [];
+
+            // 提取 <details type="reasoning"> 推理块（支持 done/duration 等属性）
+            content = content.replace(/<details[^>]*type="reasoning"[^>]*>([\s\S]*?)<\/details>/gi, (_, inner) => {
+                // 去掉 <summary>...</summary> 行，剩余为推理正文
+                const body = inner.replace(/<summary>[\s\S]*?<\/summary>\s*/i, '').trim();
+                if (body) reasoningTexts.push(body);
+                return '';
+            }).trim();
+
+            if (content) parts.push({ type: 'text', text: content });
+            if (reasoningTexts.length) parts.push({ type: 'reasoning', text: reasoningTexts.join('\n\n') });
+
+            let usage = null;
+            if (m.usage) {
+                const u = m.usage;
+                usage = {
+                    prompt_tokens: u.prompt_tokens || 0,
+                    completion_tokens: u.completion_tokens || 0,
+                    total_tokens: u.total_tokens || (u.prompt_tokens || 0) + (u.completion_tokens || 0),
+                };
+            }
+
+            // timestamp 为秒级
+            const ts = m.timestamp ? epochMsToStr(m.timestamp * 1000) : '';
+            return {
+                role,
+                created_at: ts,
+                parts,
+                usage,
+                annotations: [],
+                branch_count: 1,
+                branch_index: 0,
+                model: m.model || m.modelName || '',
+            };
         }
 
         // ─── Gemini Voyager Markdown 解析 ───
@@ -1410,10 +1574,12 @@
 
             // ── 根据来源组成动态设置侧边栏标题 ──
             const geminiCount = conversations.filter(c => c.source_type === 'gemini').length;
-            const rikkaCount = conversations.length - geminiCount;
+            const owuiCount = conversations.filter(c => c.source_type === 'openwebui').length;
+            const rikkaCount = conversations.length - geminiCount - owuiCount;
             let sidebarTitle = '🗂️ RikkaHub 对话';
-            if (geminiCount > 0 && rikkaCount === 0) sidebarTitle = '✨ Gemini 对话';
-            else if (geminiCount > 0 && rikkaCount > 0) sidebarTitle = '📚 对话列表';
+            if (owuiCount > 0 && geminiCount === 0 && rikkaCount === 0) sidebarTitle = '🌐 Open-WebUI 对话';
+            else if (geminiCount > 0 && rikkaCount === 0 && owuiCount === 0) sidebarTitle = '✨ Gemini 对话';
+            else if (geminiCount > 0 || owuiCount > 0) sidebarTitle = '📚 对话列表';
             document.getElementById('sidebarTitle').textContent = sidebarTitle;
 
             const list = document.getElementById('convList');
@@ -1422,9 +1588,13 @@
                 const conv = conversations[i];
                 const pin = conv.is_pinned ? ' 📌' : '';
 
-                // Gemini 来源显示蓝色 "Gemini" 徽章；RikkaHub 显示助手名称徽章
+                // 来源徽章：Open-WebUI 绿色，Gemini 蓝色，RikkaHub 显示助手名称
                 let badge = '';
-                if (conv.source_type === 'gemini') {
+                if (conv.source_type === 'openwebui') {
+                    // 优先显示模型名（取第一个，截短）；无则显示 "Open-WebUI"
+                    const modelLabel = (conv.models && conv.models[0]) ? conv.models[0].split('/').pop() : 'Open-WebUI';
+                    badge = ` <span class="assistant-badge owui-badge">${esc(modelLabel)}</span>`;
+                } else if (conv.source_type === 'gemini') {
                     badge = ` <span class="assistant-badge gemini-badge">Gemini</span>`;
                 } else {
                     const aName = assistants[conv.assistant_id] || '';
@@ -1457,10 +1627,12 @@
             const roleLabels = { user: '👤 User', assistant: '🤖 Assistant', system: '⚙️ System' };
             const pin = conv.is_pinned ? '📌 ' : '';
 
-            // ── Gemini 来源链接（若有则在对话头部显示）──
+            // ── 来源信息（Gemini 链接 / Open-WebUI 模型列表）──
             let sourceHtml = '';
             if (conv.source_type === 'gemini' && conv.source_url) {
                 sourceHtml = ` · <a href="${esc(conv.source_url)}" target="_blank" style="color:var(--accent)">🔗 在 Gemini 中查看</a>`;
+            } else if (conv.source_type === 'openwebui' && conv.models && conv.models.length) {
+                sourceHtml = ` · 🌐 ${esc(conv.models.join(', '))}`;
             }
 
             let html = `<div class="conv-header"><h2>${pin}${esc(conv.title)}</h2><div class="conv-info">日期: ${conv.create_at} · ${conv.messages.length} 条消息${sourceHtml}</div></div><div class="messages">`;
@@ -1471,6 +1643,8 @@
                 const extras = [];
                 if (msg.created_at) extras.push(String(msg.created_at));
                 if ((msg.branch_count || 1) > 1) extras.push(`分支 ${msg.branch_index + 1}/${msg.branch_count}`);
+                // Open-WebUI 助手消息显示具体模型名
+                if (role === 'assistant' && msg.model) extras.push(esc(msg.model.split('/').pop()));
                 if (msg.usage && msg.usage.total_tokens) extras.push(`${msg.usage.total_tokens} tokens`);
 
                 html += `<div class="message ${role}"><div class="msg-header"><span class="role-label">${label}</span>`;
