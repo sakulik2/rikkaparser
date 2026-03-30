@@ -7,6 +7,9 @@
     <title>RikkaHub 对话浏览器</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
+    <!-- KaTeX：用于渲染 LaTeX 数学公式（$...$  行内，$$...$$ 块级）-->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
     <style>
         :root {
             --bg: #f8f9fa;
@@ -269,6 +272,17 @@
         }
 
         .conv-item.active .assistant-badge {
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+        }
+
+        /* Gemini 来源标记：蓝绿配色区分 RikkaHub 的紫色 */
+        .gemini-badge {
+            background: rgba(26, 115, 232, 0.12);
+            color: #1a73e8;
+        }
+
+        .conv-item.active .gemini-badge {
             background: rgba(255, 255, 255, 0.2);
             color: #fff;
         }
@@ -749,11 +763,12 @@
     <div class="upload-screen" id="uploadScreen">
         <div class="upload-inner">
             <h1>📱 RikkaHub 对话浏览器</h1>
-            <p>选择 RikkaHub 备份 zip 文件，在浏览器中直接解析查看</p>
+            <p>支持 RikkaHub 备份 <code style="background:var(--code-bg);padding:1px 4px;border-radius:3px">.zip</code> 文件，以及 <a href="https://github.com/Nagi-ovo/gemini-voyager" target="_blank" style="color:var(--accent)">Gemini Voyager</a> 导出的 <code style="background:var(--code-bg);padding:1px 4px;border-radius:3px">.md</code> 文件（支持多选）</p>
             <div class="upload-area" id="uploadArea">
                 <div class="icon">📦</div>
-                <div class="label">点击选择或拖拽 zip 文件到此处</div>
-                <input type="file" id="fileInput" accept=".zip">
+                <div class="label">点击选择或拖拽文件到此处<br><span style="font-size:0.78rem;opacity:0.7">支持 .zip（RikkaHub）或 .md（Gemini Voyager，可多选）</span></div>
+                <!-- multiple 允许同时选取多个 .md 文件 -->
+                <input type="file" id="fileInput" accept=".zip,.md" multiple>
             </div>
             <div class="progress-bar" id="progressBar">
                 <div class="progress-fill" id="progressFill"></div>
@@ -766,7 +781,8 @@
     <div class="app-container" id="appContainer">
         <div class="sidebar" id="sidebar">
             <div class="sidebar-header">
-                <h2>🗂️ RikkaHub 对话</h2>
+                <!-- 标题会根据加载的数据来源动态更新 -->
+                <h2 id="sidebarTitle">🗂️ 对话列表</h2>
                 <span class="conv-count" id="convCount"></span>
             </div>
             <div class="search-wrap">
@@ -809,8 +825,10 @@
         uploadArea.addEventListener('click', () => fileInput.click());
         uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.classList.add('dragover'); });
         uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
-        uploadArea.addEventListener('drop', e => { e.preventDefault(); uploadArea.classList.remove('dragover'); if (e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]); });
-        fileInput.addEventListener('change', e => { if (e.target.files[0]) processFile(e.target.files[0]); });
+        // 拖拽支持多文件
+        uploadArea.addEventListener('drop', e => { e.preventDefault(); uploadArea.classList.remove('dragover'); if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files); });
+        // 文件选择框支持多文件
+        fileInput.addEventListener('change', e => { if (e.target.files.length) handleFiles(e.target.files); });
 
         function setStatus(msg, pct) {
             statusText.style.display = 'block';
@@ -821,7 +839,33 @@
             }
         }
 
+        // ─── 文件分发入口：根据扩展名路由到不同解析器 ───
+        /**
+         * 统一文件入口。
+         * - 若包含 .zip：走 RikkaHub 解析流程（只取第一个 zip）
+         * - 若只有 .md：走 Gemini Voyager 解析流程（支持多文件）
+         */
+        async function handleFiles(fileList) {
+            const files = Array.from(fileList);
+            const zipFile = files.find(f => f.name.toLowerCase().endsWith('.zip'));
+            const mdFiles = files.filter(f => f.name.toLowerCase().endsWith('.md'));
+
+            if (zipFile) {
+                // RikkaHub 备份：优先处理 zip，忽略同批次 .md
+                await processZipFile(zipFile);
+            } else if (mdFiles.length > 0) {
+                // Gemini Voyager 导出：可多文件
+                await processMarkdownFiles(mdFiles);
+            }
+        }
+
+        // 保留旧名字作为单文件兼容入口（内部调用 handleFiles）
         async function processFile(file) {
+            await handleFiles([file]);
+        }
+
+        // ─── RikkaHub ZIP 解析（原 processFile 逻辑）───
+        async function processZipFile(file) {
             try {
                 setStatus('正在读取 zip 文件...', 10);
                 const arrayBuffer = await file.arrayBuffer();
@@ -881,6 +925,146 @@
                 setStatus('❌ 解析失败: ' + e.message);
                 console.error(e);
             }
+        }
+
+        // ─── Gemini Voyager Markdown 解析 ───
+
+        /**
+         * 解析单个 Gemini Voyager 导出的 .md 文件，返回对话对象。
+         *
+         * 文件格式：
+         *   # 对话标题
+         *   **Date**: 日期字符串
+         *   **Turns**: N
+         *   **Source**: [文本](URL)
+         *   ---
+         *   ## Turn 1
+         *   ### 👤 User
+         *   用户内容（可含 Markdown）
+         *   ### 🤖 Assistant
+         *   助手内容（可含 ##/### 标题等 Markdown）
+         *   ## Turn 2
+         *   ...
+         *
+         * @param {string} text     文件全文
+         * @param {string} fileName 文件名（标题备用）
+         * @returns {object} 与 RikkaHub 对话结构兼容的对象
+         */
+        function parseGeminiMarkdownFile(text, fileName) {
+            // ── 提取标题（第一个 H1 行）──
+            const titleMatch = text.match(/^#\s+(.+)$/m);
+            const title = titleMatch ? titleMatch[1].trim() : fileName.replace(/\.md$/i, '');
+
+            // ── 提取日期字段 ──
+            const dateMatch = text.match(/\*\*Date\*\*:\s*(.+)/);
+            const dateStr = dateMatch ? dateMatch[1].trim() : '';
+
+            // ── 提取来源 URL（**Source**: [文本](URL) 格式）──
+            const sourceMatch = text.match(/\*\*Source\*\*:\s*\[.*?\]\(([^)]+)\)/);
+            const sourceUrl = sourceMatch ? sourceMatch[1] : '';
+
+            // ── 定位正文（元信息 --- 分隔符之后）──
+            const sepIdx = text.indexOf('\n---\n');
+            const bodyText = sepIdx >= 0 ? text.slice(sepIdx + 5) : text;
+
+            // ── 找到所有 ## Turn N 段落的起始位置 ──
+            // 注意：助手回复内可能包含 ## 标题，但 "## Turn N" 只在顶层出现
+            const turnPattern = /^## Turn \d+/gm;
+            let m;
+            const turnStarts = [];
+            while ((m = turnPattern.exec(bodyText)) !== null) {
+                turnStarts.push(m.index);
+            }
+
+            const messages = [];
+            // 两个角色标记字符串（包含前后换行，精确匹配）
+            const USER_MARKER = '\n### 👤 User\n';
+            const ASST_MARKER = '\n### 🤖 Assistant\n';
+
+            for (let i = 0; i < turnStarts.length; i++) {
+                const secStart = turnStarts[i];
+                const secEnd = i + 1 < turnStarts.length ? turnStarts[i + 1] : bodyText.length;
+                const section = bodyText.slice(secStart, secEnd);
+
+                const userIdx = section.indexOf(USER_MARKER);
+                const asstIdx = section.indexOf(ASST_MARKER);
+
+                // ── 用户消息：USER_MARKER 到 ASST_MARKER（或段末）之间的内容 ──
+                if (userIdx !== -1) {
+                    const contentEnd = asstIdx !== -1 ? asstIdx : section.length;
+                    const userContent = section.slice(userIdx + USER_MARKER.length, contentEnd).trim();
+                    if (userContent) {
+                        messages.push({
+                            role: 'user',
+                            parts: [{ type: 'text', text: userContent }],
+                            annotations: [], usage: null, created_at: '',
+                            model_id: null, translation: null,
+                            branch_count: 1, branch_index: 0
+                        });
+                    }
+                }
+
+                // ── 助手消息：ASST_MARKER 之后直到段末 ──
+                if (asstIdx !== -1) {
+                    const asstContent = section.slice(asstIdx + ASST_MARKER.length).trim();
+                    if (asstContent) {
+                        messages.push({
+                            role: 'assistant',
+                            parts: [{ type: 'text', text: asstContent }],
+                            annotations: [], usage: null, created_at: '',
+                            model_id: null, translation: null,
+                            branch_count: 1, branch_index: 0
+                        });
+                    }
+                }
+            }
+
+            return {
+                // 用随机 id 避免与 RikkaHub 数字 id 冲突
+                id: 'gemini-' + Date.now() + '-' + Math.random().toString(36).slice(2),
+                title,
+                create_at: dateStr,
+                update_at: dateStr,
+                is_pinned: false,
+                assistant_id: null,
+                source_type: 'gemini',  // 标识来源，用于侧栏显示徽章
+                source_url: sourceUrl,  // 原始 Gemini 对话链接
+                messages
+            };
+        }
+
+        /**
+         * 处理一批 Gemini Voyager .md 文件，解析后填充 conversations 并切换到主视图。
+         * @param {File[]} mdFiles 用户选择的 .md 文件数组
+         */
+        async function processMarkdownFiles(mdFiles) {
+            setStatus(`正在解析 ${mdFiles.length} 个 Markdown 文件...`, 20);
+
+            const parsed = [];
+            for (let i = 0; i < mdFiles.length; i++) {
+                const file = mdFiles[i];
+                setStatus(`正在解析: ${file.name}`, Math.round(20 + (i / mdFiles.length) * 70));
+                try {
+                    const text = await file.text();
+                    const conv = parseGeminiMarkdownFile(text, file.name);
+                    parsed.push(conv);
+                } catch (e) {
+                    console.warn('解析失败:', file.name, e);
+                }
+            }
+
+            // 对话按日期字符串降序排列（最新在前）
+            parsed.sort((a, b) => b.create_at.localeCompare(a.create_at));
+
+            conversations = parsed;
+            assistants = {};
+
+            setStatus('完成！', 100);
+            setTimeout(() => {
+                document.getElementById('uploadScreen').style.display = 'none';
+                document.getElementById('appContainer').style.display = 'flex';
+                renderSidebar([]);
+            }, 300);
         }
 
         // ─── Database Reading ───
@@ -1011,6 +1195,52 @@
         }
 
         // ─── Markdown Renderer ───
+
+        /**
+         * 渲染 KaTeX 公式，失败时退回原始文本（避免整页崩溃）。
+         * @param {string} src   LaTeX 源码（不含 $ 符号）
+         * @param {boolean} block 是否为块级公式
+         */
+        function renderMath(src, block) {
+            try {
+                return katex.renderToString(src, { displayMode: block, throwOnError: false });
+            } catch (e) {
+                return block ? `<pre>$$${src}$$</pre>` : `<code>$${src}$</code>`;
+            }
+        }
+
+        /**
+         * 在进入 Markdown 解析管道之前，把数学公式提取为占位符，
+         * 避免 $ 符号被误当成普通文本或被 inlineFormat 破坏。
+         * 支持：
+         *   $$...$$  （块级，单行或多行）
+         *   $...$    （行内，不跨行）
+         */
+        function extractMath(text) {
+            const slots = [];   // 保存原始 LaTeX 源码和类型
+
+            // 先处理块级 $$...$$（优先级高于行内）
+            text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_, src) => {
+                slots.push({ src, block: true });
+                return `\x00M${slots.length - 1}\x00`;
+            });
+
+            // 再处理行内 $...$（不允许跨行，也不允许内容为空）
+            text = text.replace(/\$([^\n$]+?)\$/g, (_, src) => {
+                slots.push({ src, block: false });
+                return `\x00M${slots.length - 1}\x00`;
+            });
+
+            return { text, slots };
+        }
+
+        /** 把占位符替换回 KaTeX 渲染结果 */
+        function restoreMath(html, slots) {
+            return html.replace(/\x00M(\d+)\x00/g, (_, i) => {
+                const { src, block } = slots[+i];
+                return renderMath(src, block);
+            });
+        }
         function esc(s) {
             const div = document.createElement('div');
             div.textContent = s;
@@ -1042,7 +1272,9 @@
         }
 
         function simpleMarkdown(text) {
-            const lines = text.split('\n');
+            // 在进入行解析前，先把数学公式替换为占位符，防止 $ 被误处理
+            const { text: safeText, slots } = extractMath(text);
+            const lines = safeText.split('\n');
             const result = [];
             let inCode = false, codeLang = '', codeLines = [];
             let inTable = false, tableRows = [];
@@ -1133,7 +1365,8 @@
 
             if (inCode && codeLines.length) result.push(`<pre><code>${esc(codeLines.join('\n'))}</code></pre>`);
             if (inTable) flushTable();
-            return result.join('\n');
+            // 最后把数学公式占位符还原为 KaTeX 渲染的 HTML
+            return restoreMath(result.join('\n'), slots);
         }
 
         // ─── Rendering ───
@@ -1175,13 +1408,29 @@
             document.getElementById('convCount').textContent = `${conversations.length} 条对话`;
             document.getElementById('welcomeInfo').textContent = `共 ${conversations.length} 条对话记录` + (memories.length ? ` · 🧠 ${memories.length} 条 AI 记忆` : '');
 
+            // ── 根据来源组成动态设置侧边栏标题 ──
+            const geminiCount = conversations.filter(c => c.source_type === 'gemini').length;
+            const rikkaCount = conversations.length - geminiCount;
+            let sidebarTitle = '🗂️ RikkaHub 对话';
+            if (geminiCount > 0 && rikkaCount === 0) sidebarTitle = '✨ Gemini 对话';
+            else if (geminiCount > 0 && rikkaCount > 0) sidebarTitle = '📚 对话列表';
+            document.getElementById('sidebarTitle').textContent = sidebarTitle;
+
             const list = document.getElementById('convList');
             list.innerHTML = '';
             for (let i = 0; i < conversations.length; i++) {
                 const conv = conversations[i];
                 const pin = conv.is_pinned ? ' 📌' : '';
-                const aName = assistants[conv.assistant_id] || '';
-                const badge = aName ? ` <span class="assistant-badge">${esc(aName)}</span>` : '';
+
+                // Gemini 来源显示蓝色 "Gemini" 徽章；RikkaHub 显示助手名称徽章
+                let badge = '';
+                if (conv.source_type === 'gemini') {
+                    badge = ` <span class="assistant-badge gemini-badge">Gemini</span>`;
+                } else {
+                    const aName = assistants[conv.assistant_id] || '';
+                    if (aName) badge = ` <span class="assistant-badge">${esc(aName)}</span>`;
+                }
+
                 const item = document.createElement('div');
                 item.className = 'conv-item';
                 item.dataset.index = i;
@@ -1208,7 +1457,13 @@
             const roleLabels = { user: '👤 User', assistant: '🤖 Assistant', system: '⚙️ System' };
             const pin = conv.is_pinned ? '📌 ' : '';
 
-            let html = `<div class="conv-header"><h2>${pin}${esc(conv.title)}</h2><div class="conv-info">创建: ${conv.create_at} · 更新: ${conv.update_at} · ${conv.messages.length} 条消息</div></div><div class="messages">`;
+            // ── Gemini 来源链接（若有则在对话头部显示）──
+            let sourceHtml = '';
+            if (conv.source_type === 'gemini' && conv.source_url) {
+                sourceHtml = ` · <a href="${esc(conv.source_url)}" target="_blank" style="color:var(--accent)">🔗 在 Gemini 中查看</a>`;
+            }
+
+            let html = `<div class="conv-header"><h2>${pin}${esc(conv.title)}</h2><div class="conv-info">日期: ${conv.create_at} · ${conv.messages.length} 条消息${sourceHtml}</div></div><div class="messages">`;
 
             for (const msg of conv.messages) {
                 const role = (msg.role || '').toLowerCase();
