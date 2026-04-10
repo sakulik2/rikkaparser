@@ -64,11 +64,16 @@ def read_conversations(db_path: str) -> list[Conversation]:
     conversations = []
 
     try:
-        cursor = conn.execute(
-            "SELECT id, assistant_id, title, create_at, update_at, "
-            "truncate_index, suggestions, is_pinned "
-            "FROM ConversationEntity ORDER BY update_at DESC"
-        )
+        # Check if is_pinned exists
+        table_info = conn.execute("PRAGMA table_info(ConversationEntity)").fetchall()
+        columns = [column[1] for column in table_info]
+        
+        select_columns = ["id", "assistant_id", "title", "create_at", "update_at"]
+        if "is_pinned" in columns:
+            select_columns.append("is_pinned")
+        
+        query = f"SELECT {', '.join(select_columns)} FROM ConversationEntity ORDER BY update_at DESC"
+        cursor = conn.execute(query)
 
         for row in cursor.fetchall():
             conv = Conversation(
@@ -79,7 +84,7 @@ def read_conversations(db_path: str) -> list[Conversation]:
                 update_at=epoch_ms_to_str(row["update_at"]),
                 create_at_ts=row["create_at"],
                 update_at_ts=row["update_at"],
-                is_pinned=bool(row["is_pinned"]),
+                is_pinned=bool(row["is_pinned"]) if "is_pinned" in row.keys() else False,
             )
 
             # 读取该对话的消息节点

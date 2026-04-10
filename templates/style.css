@@ -101,6 +101,30 @@ body {
     background: rgba(255,255,255,0.2);
     color: #fff;
 }
+.gemini-badge {
+    background: rgba(26, 115, 232, 0.12);
+    color: #1a73e8;
+}
+.conv-item.active .gemini-badge {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+}
+.owui-badge {
+    background: rgba(16, 163, 127, 0.12);
+    color: #10a37f;
+}
+.conv-item.active .owui-badge {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+}
+.chatbox-badge {
+    background: rgba(255, 152, 0, 0.12);
+    color: #f57c00;
+}
+.conv-item.active .chatbox-badge {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+}
 /* Main */
 .main {
     flex: 1;

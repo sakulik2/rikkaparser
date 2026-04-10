@@ -48,3 +48,10 @@ document.addEventListener('keydown', (e) => {
         items[idx].scrollIntoView({ block: 'nearest' });
     }
 });
+// Initialize: Show first conversation if exists
+window.addEventListener('load', () => {
+    const firstItem = document.querySelector('.conv-item');
+    if (firstItem) {
+        showConversation(parseInt(firstItem.getAttribute('data-index')));
+    }
+});

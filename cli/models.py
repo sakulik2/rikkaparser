@@ -1,5 +1,5 @@
 """
-RikkaHub 数据模型定义。
+数据模型定义
 """
 
 from dataclasses import dataclass, field
@@ -48,6 +48,9 @@ class Conversation:
     create_at_ts: int = 0
     update_at_ts: int = 0
     is_pinned: bool = False
+    source_type: str = "rikkahub"
+    source_url: str = ""
+    models: list[str] = field(default_factory=list)
     messages: list[Message] = field(default_factory=list)
 
 

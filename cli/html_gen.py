@@ -56,7 +56,7 @@ def _build_head(css: str) -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>RikkaHub 对话浏览器</title>
+<title>AI 对话导出报告</title>
 <style>
 {css}
 </style>
@@ -69,7 +69,23 @@ def _build_sidebar(conversations: list[Conversation], assistants: dict[str, str]
     parts = []
     parts.append('<div class="sidebar" id="sidebar">')
     parts.append('<div class="sidebar-header">')
-    parts.append('<h2>🗂️ RikkaHub 对话</h2>')
+    gemini_count = sum(1 for c in conversations if c.source_type == "gemini")
+    owui_count = sum(1 for c in conversations if c.source_type == "openwebui")
+    chatbox_count = sum(1 for c in conversations if c.source_type == "chatbox")
+    rikka_count = len(conversations) - gemini_count - owui_count - chatbox_count
+    
+    if owui_count > 0 and gemini_count == 0 and rikka_count == 0 and chatbox_count == 0:
+        sidebar_title = "🌐 Open-WebUI 对话"
+    elif gemini_count > 0 and rikka_count == 0 and owui_count == 0 and chatbox_count == 0:
+        sidebar_title = "✨ Gemini 对话"
+    elif chatbox_count > 0 and rikka_count == 0 and owui_count == 0 and gemini_count == 0:
+        sidebar_title = "📦 Chatbox 对话"
+    elif gemini_count > 0 or owui_count > 0 or chatbox_count > 0:
+        sidebar_title = "📚 对话列表"
+    else:
+        sidebar_title = "🗂️ RikkaHub 对话"
+
+    parts.append(f'<h2>{sidebar_title}</h2>')
     parts.append(f'<span class="conv-count">{len(conversations)} 条对话</span>')
     parts.append('</div>')
     parts.append('<input type="text" class="search-box" id="searchBox" placeholder="🔍 搜索对话..." oninput="filterConversations()">')
@@ -77,8 +93,18 @@ def _build_sidebar(conversations: list[Conversation], assistants: dict[str, str]
 
     for i, conv in enumerate(conversations):
         pinned = ' 📌' if conv.is_pinned else ''
-        assistant_name = assistants.get(conv.assistant_id, "")
-        badge = f' <span class="assistant-badge">{escape(assistant_name)}</span>' if assistant_name else ''
+        stype = conv.source_type
+        if stype == "openwebui":
+            model_label = conv.models[0].split('/')[-1] if conv.models else "Open-WebUI"
+            badge = f' <span class="assistant-badge owui-badge">{escape(model_label)}</span>'
+        elif stype == "gemini":
+            badge = f' <span class="assistant-badge gemini-badge">Gemini</span>'
+        elif stype == "chatbox":
+            badge = f' <span class="assistant-badge chatbox-badge">Chatbox</span>'
+        else:
+            assistant_name = assistants.get(conv.assistant_id, "")
+            badge = f' <span class="assistant-badge">{escape(assistant_name)}</span>' if assistant_name else ''
+            
         msg_count = len(conv.messages)
         parts.append(
             f'<div class="conv-item" data-index="{i}" onclick="showConversation({i})" '
@@ -100,7 +126,7 @@ def _build_main(conversations: list[Conversation], assistants: dict, memories: l
 
     # Welcome
     parts.append('<div class="welcome" id="welcome"><div class="welcome-inner">')
-    parts.append('<h1>📱 RikkaHub 对话浏览器</h1>')
+    parts.append('<h1>💬 AI 对话导出报告</h1>')
     parts.append(f'<p>共 {len(conversations)} 条对话记录</p>')
     if memories:
         parts.append(f'<p>🧠 {len(memories)} 条 AI 记忆</p>')
@@ -112,14 +138,24 @@ def _build_main(conversations: list[Conversation], assistants: dict, memories: l
         parts.append(f'<div class="conv-view" id="conv-{i}" style="display:none">')
         pin = '📌 ' if conv.is_pinned else ''
         parts.append(f'<div class="conv-header"><h2>{pin}{escape(conv.title)}</h2>')
-        parts.append(f'<div class="conv-info">创建: {conv.create_at}  ·  更新: {conv.update_at}  ·  {len(conv.messages)} 条消息</div></div>')
+        
+        source_html = ""
+        stype = conv.source_type
+        if stype == "gemini" and conv.source_url:
+            source_html = f'  ·  <a href="{escape(conv.source_url)}" target="_blank" style="color:var(--accent)">🔗 在 Gemini 中查看</a>'
+        elif stype == "openwebui" and conv.models:
+            source_html = f'  ·  🌐 {escape(", ".join(conv.models))}'
+        elif stype == "chatbox":
+            source_html = f'  ·  📦 Chatbox 数据'
+            
+        parts.append(f'<div class="conv-info">创建: {conv.create_at}  ·  更新: {conv.update_at}  ·  {len(conv.messages)} 条消息{source_html}</div></div>')
         parts.append('<div class="messages">')
 
         for msg in conv.messages:
             parts.append(_render_message(msg))
 
         parts.append('</div></div>')
-
+    
     parts.append('</div>')
     return "\n".join(parts)
 
@@ -138,6 +174,8 @@ def _render_message(msg: Message) -> str:
         extras.append(str(msg.created_at))
     if msg.branch_count > 1:
         extras.append(f'分支 {msg.branch_index+1}/{msg.branch_count}')
+    if msg.model_id:
+        extras.append(escape(msg.model_id.split('/')[-1]))
     if msg.usage:
         tokens = msg.usage.get("total_tokens", 0)
         if tokens:

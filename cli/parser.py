@@ -19,9 +19,9 @@ import json
 import sys
 from datetime import datetime
 
-from .db_reader import parse_backup_zip
+from .db_reader import parse_backup_zip, epoch_ms_to_str
 from .html_gen import generate_html
-from .models import Conversation, Message, ParseResult
+from .models import Conversation, Message, MessagePart, ParseResult
 
 
 def main():
@@ -29,11 +29,11 @@ def main():
         description="RikkaHub 备份解析器",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("zipfile", help="RikkaHub 备份 zip 文件路径")
+    parser.add_argument("file", help="RikkaHub 备份 zip 文件或 Chatbox 导出的 JSON 文件")
     parser.add_argument("-o", "--output", help="输出文件路径")
     parser.add_argument(
         "--export",
-        choices=["html", "json", "txt"],
+        choices=["html", "json", "txt", "chatbox"],
         default="html",
         help="输出格式 (默认: html)",
     )
@@ -49,9 +49,17 @@ def main():
 
     args = parser.parse_args()
 
-    # 解析备份
-    print(f"📦 正在解析: {args.zipfile}")
-    data = parse_backup_zip(args.zipfile)
+    # 解析输入文件
+    print(f"📦 正在解析: {args.file}")
+    
+    file_lower = args.file.lower()
+    if file_lower.endswith(".json"):
+        data = parse_json_file(args.file)
+    elif file_lower.endswith(".md"):
+        data = parse_gemini_md(args.file)
+    else:
+        data = parse_backup_zip(args.file)
+        
     print(f"   发现 {len(data.conversations)} 条对话, {len(data.memories)} 条记忆")
 
     # 筛选
@@ -89,6 +97,11 @@ def main():
         if not output:
             output = "rikkahub_chats.txt"
         _export_txt(data, output)
+
+    elif args.export == "chatbox":
+        if not output:
+            output = "chatbox_export.json"
+        _export_chatbox(data, output)
 
 
 def _filter_by_assistant(data: ParseResult, name: str) -> ParseResult:
@@ -247,6 +260,356 @@ def _export_txt(data: ParseResult, output: str):
     with open(output, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
     print(f"✅ 已导出 TXT: {output}")
+
+
+def _export_chatbox(data: ParseResult, output: str):
+    """导出为 Chatbox 所需的 JSON 格式。"""
+    from datetime import datetime, timezone
+    
+    result = {
+        "__exported_items": ["conversations"],
+        "__exported_at": datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z'),
+        "chat-session-settings": {},
+        "chat-sessions-list": []
+    }
+    
+    for conv in data.conversations:
+        session_id = conv.id
+        result["chat-sessions-list"].append({
+            "id": session_id,
+            "name": conv.title,
+            "starred": conv.is_pinned,
+            "type": "chat"
+        })
+        
+        c_messages = []
+        for i, msg in enumerate(conv.messages):
+            msg_parts = []
+            for part in msg.parts:
+                if part.type in ("text", "reasoning"):
+                    msg_parts.append({"type": "text", "text": part.text})
+                elif part.type == "image":
+                    msg_parts.append({"type": "image", "storageKey": part.url})
+                else:
+                    msg_parts.append({"type": "text", "text": f"[{part.type}] {part.text or part.url}"})
+            
+            role = msg.role.lower()
+            if role not in ("user", "assistant", "system"):
+                role = "assistant"
+                
+            msg_id = f"{session_id}-msg-{i}"
+            
+            ts = conv.update_at_ts
+            if msg.created_at:
+                try:
+                    dt = datetime.fromisoformat(msg.created_at.replace('Z', '+00:00'))
+                    ts = int(dt.timestamp() * 1000)
+                except ValueError:
+                    pass
+            
+            c_messages.append({
+                "id": msg_id,
+                "role": role,
+                "contentParts": msg_parts,
+                "timestamp": ts,
+            })
+            
+        result[f"session:{session_id}"] = {
+            "name": conv.title,
+            "type": "chat",
+            "messages": c_messages,
+            "settings": {},
+            "id": session_id,
+            "messageForksHash": {},
+            "threadName": conv.title
+        }
+
+    with open(output, "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+    print(f"✅ 已导出 Chatbox JSON: {output}")
+
+
+def parse_json_file(json_path: str) -> ParseResult:
+    """处理 JSON 文件的分发解析。"""
+    from pathlib import Path
+    
+    json_path = Path(json_path)
+    if not json_path.exists():
+        print(f"错误: 文件不存在: {json_path}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except json.JSONDecodeError:
+        print(f"错误: 不是有效的 JSON 文件: {json_path}", file=sys.stderr)
+        sys.exit(1)
+
+    if isinstance(data, dict) and ("__exported_items" in data or "chat-sessions-list" in data):
+        return parse_chatbox_export(data)
+    elif isinstance(data, list):
+        return parse_openwebui_export(data)
+    else:
+        print(f"警告: 未知的 JSON 格式: {json_path}", file=sys.stderr)
+        return ParseResult()
+
+
+def parse_chatbox_export(data: dict) -> ParseResult:
+    """解析 Chatbox 导出的 JSON 数据结构。"""
+    result = ParseResult()
+    session_list = data.get("chat-sessions-list", [])
+
+    for session_meta in session_list:
+        session_id = session_meta.get("id")
+        if not session_id:
+            continue
+
+        session_key = f"session:{session_id}"
+        session_data = data.get(session_key)
+        if not session_data:
+            continue
+
+        title = session_data.get("name", "(无标题)")
+        is_pinned = session_meta.get("starred", False)
+        messages_data = session_data.get("messages", [])
+
+        conv = Conversation(
+            id=session_id,
+            title=title,
+            is_pinned=is_pinned,
+            source_type="chatbox"
+        )
+
+        min_ts = -1
+        max_ts = -1
+
+        for msg_idx, msg_data in enumerate(messages_data):
+            role = msg_data.get("role", "unknown")
+            timestamp = msg_data.get("timestamp", 0)
+            
+            if min_ts == -1 or timestamp < min_ts:
+                min_ts = timestamp
+            if timestamp > max_ts:
+                max_ts = timestamp
+
+            parts = []
+            for part in msg_data.get("contentParts", []):
+                part_type = part.get("type", "")
+                
+                if part_type == "text":
+                    parts.append(MessagePart(type="text", text=part.get("text", "")))
+                elif part_type == "reasoning":
+                    parts.append(MessagePart(type="reasoning", text=part.get("text", "")))
+                elif part_type == "image":
+                    parts.append(MessagePart(type="image", url=part.get("storageKey", "")))
+                else:
+                    parts.append(MessagePart(type=part_type, text=part.get("text", "") or str(part)))
+                    
+            usage = None
+            if "usage" in msg_data:
+                u = msg_data["usage"]
+                usage = {
+                    "prompt_tokens": u.get("inputTokens", 0),
+                    "completion_tokens": u.get("outputTokens", 0),
+                    "total_tokens": u.get("totalTokens", 0),
+                }
+
+            msg = Message(
+                role=role,
+                parts=parts,
+                usage=usage,
+                created_at=epoch_ms_to_str(timestamp),
+                model_id=msg_data.get("model", ""),
+                branch_count=1,
+                branch_index=0
+            )
+            conv.messages.append(msg)
+
+        if min_ts != -1:
+            conv.create_at_ts = min_ts
+            conv.create_at = epoch_ms_to_str(min_ts)
+        if max_ts != -1:
+            conv.update_at_ts = max_ts
+            conv.update_at = epoch_ms_to_str(max_ts)
+
+        result.conversations.append(conv)
+
+    # 按照更新时间排序倒序
+    result.conversations.sort(key=lambda c: c.update_at_ts, reverse=True)
+
+    return result
+
+
+def parse_openwebui_export(data: list) -> ParseResult:
+    """解析 Open-WebUI 导出的 JSON 记录数组。"""
+    import re
+    result = ParseResult()
+
+    for item in data:
+        try:
+            chat = item.get("chat", {})
+            history = chat.get("history", {})
+            msg_map = history.get("messages", {})
+            current_id = history.get("currentId")
+
+            # 回溯主树干链条
+            chain = []
+            mid = current_id
+            visited = set()
+            while mid and mid not in visited:
+                visited.add(mid)
+                m = msg_map.get(mid)
+                if not m:
+                    break
+                chain.append(m)
+                mid = m.get("parentId")
+            chain.reverse()
+
+            created_ts = int((item.get("created_at") or chat.get("timestamp") or 0) * 1000)
+            updated_ts = int((item.get("updated_at") or item.get("created_at") or 0) * 1000)
+            
+            conv = Conversation(
+                id=item.get("id", ""),
+                title=item.get("title") or chat.get("title") or "(无标题)",
+                create_at=epoch_ms_to_str(created_ts),
+                update_at=epoch_ms_to_str(updated_ts),
+                create_at_ts=created_ts,
+                update_at_ts=updated_ts,
+                is_pinned=bool(item.get("pinned")),
+                source_type="openwebui",
+                models=chat.get("models", [])
+            )
+
+            for m in chain:
+                role = m.get("role", "user")
+                content = m.get("content", "")
+                parts = []
+                
+                # 提取分离 reasoning 和 text (使用非贪婪正则)
+                reasoning_pattern = re.compile(r'<details[^>]*type="reasoning"[^>]*>([\s\S]*?)<\/details>', re.IGNORECASE)
+                
+                def replace_reasoning(match):
+                    inner = match.group(1)
+                    # 去掉 <summary> 行
+                    body = re.sub(r'<summary>[\s\S]*?<\/summary>\s*', '', inner, flags=re.IGNORECASE).strip()
+                    if body:
+                        parts.append(MessagePart("reasoning", text=body))
+                    return ''
+                
+                content = reasoning_pattern.sub(replace_reasoning, content).strip()
+                
+                if content:
+                    parts.insert(0, MessagePart("text", text=content))
+                
+                usage = None
+                if m.get("usage"):
+                    u = m["usage"]
+                    usage = {
+                        "prompt_tokens": u.get("prompt_tokens", 0),
+                        "completion_tokens": u.get("completion_tokens", 0),
+                        "total_tokens": u.get("total_tokens", u.get("prompt_tokens", 0) + u.get("completion_tokens", 0))
+                    }
+
+                msg_ts = int((m.get("timestamp") or 0) * 1000)
+                msg = Message(
+                    role=role,
+                    parts=parts,
+                    usage=usage,
+                    created_at=epoch_ms_to_str(msg_ts) if msg_ts else "",
+                    model_id=m.get("model") or m.get("modelName") or ""
+                )
+                conv.messages.append(msg)
+
+            result.conversations.append(conv)
+            
+        except Exception as e:
+            print(f"跳过无效对话: {item.get('id', '未知')} ({e})", file=sys.stderr)
+            
+    # 按更新时间倒序
+    result.conversations.sort(key=lambda c: c.update_at_ts, reverse=True)
+    return result
+
+
+def parse_gemini_md(md_path: str) -> ParseResult:
+    """提取分析 Gemini Voyager 导出的 Markdown 文件。"""
+    import re
+    from pathlib import Path
+    import uuid
+
+    md_path = Path(md_path)
+    if not md_path.exists():
+        print(f"错误: 文件不存在: {md_path}", file=sys.stderr)
+        sys.exit(1)
+
+    with open(md_path, "r", encoding="utf-8") as f:
+        text = f.read()
+
+    # 提取标题
+    title_match = re.search(r'^#\s+(.+)$', text, flags=re.MULTILINE)
+    title = title_match.group(1).strip() if title_match else md_path.stem
+
+    # 提取日期
+    date_match = re.search(r'\*\*Date\*\*:\s*([^\n]+)', text)
+    date_str = date_match.group(1).strip() if date_match else ""
+
+    # 提取源 URL
+    source_match = re.search(r'\*\*Source\*\*:\s*\[.*?\]\(([^)]+)\)', text)
+    source_url = source_match.group(1) if source_match else ""
+
+    # 定位正文分隔符后
+    parts = text.split('\n---\n', 1)
+    body_text = parts[1] if len(parts) > 1 else text
+
+    # 使用正则切分所有的 Turn
+    turn_starts = [m.start() for m in re.finditer(r'^## Turn \d+', body_text, flags=re.MULTILINE)]
+    
+    messages = []
+    USER_MARKER = '\n### 👤 User\n'
+    ASST_MARKER = '\n### 🤖 Assistant\n'
+    
+    # 辅助查找严格匹配
+    def find_strictly(substr, string, startpos=0):
+        idx = string.find(substr, startpos)
+        return idx if idx != -1 else len(string)
+
+    for i in range(len(turn_starts)):
+        sec_start = turn_starts[i]
+        sec_end = turn_starts[i + 1] if i + 1 < len(turn_starts) else len(body_text)
+        section = body_text[sec_start:sec_end]
+        
+        user_idx = section.find(USER_MARKER)
+        asst_idx = section.find(ASST_MARKER)
+        
+        if user_idx != -1:
+            content_end = asst_idx if asst_idx != -1 else len(section)
+            user_content = section[user_idx + len(USER_MARKER):content_end].strip()
+            if user_content:
+                messages.append(Message(
+                    role="user",
+                    parts=[MessagePart("text", text=user_content)]
+                ))
+                
+        if asst_idx != -1:
+            asst_content = section[asst_idx + len(ASST_MARKER):].strip()
+            if asst_content:
+                messages.append(Message(
+                    role="assistant",
+                    parts=[MessagePart("text", text=asst_content)]
+                ))
+
+    conv = Conversation(
+        id=f"gemini-{uuid.uuid4().hex[:8]}",
+        title=title,
+        create_at=date_str,
+        update_at=date_str,
+        source_type="gemini",
+        source_url=source_url,
+        messages=messages
+    )
+
+    result = ParseResult()
+    result.conversations.append(conv)
+    return result
 
 
 if __name__ == "__main__":
