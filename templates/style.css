@@ -428,7 +428,18 @@ body {
 ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
 /* Responsive */
+/* Single Conversation Mode */
+.single-conv .sidebar {
+    display: none !important;
+}
+.single-conv .menu-btn {
+    display: none !important;
+}
+
 @media (max-width: 768px) {
+    .single-conv .conv-view {
+        padding-top: 12px;
+    }
     .sidebar {
         position: fixed;
         left: 0; top: 0;

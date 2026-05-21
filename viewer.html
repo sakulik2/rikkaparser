@@ -767,7 +767,19 @@
             border-radius: 3px;
         }
 
+        /* Single Conversation Mode */
+        .single-conv .sidebar {
+            display: none !important;
+        }
+        .single-conv .menu-btn {
+            display: none !important;
+        }
+
         @media (max-width: 768px) {
+            .single-conv .conv-view {
+                padding-top: 12px;
+            }
+
             .sidebar {
                 position: fixed;
                 left: 0;
@@ -1729,6 +1741,13 @@
                 item.onclick = () => showConversation(i);
                 item.innerHTML = `<div class="conv-title">${pin}${esc(conv.title)}${badge}</div><div class="conv-meta">${conv.update_at} · ${conv.messages.length} 条消息</div>`;
                 list.appendChild(item);
+            }
+
+            if (conversations.length === 1) {
+                document.body.classList.add('single-conv');
+                showConversation(0);
+            } else {
+                document.body.classList.remove('single-conv');
             }
         }
 

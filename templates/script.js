@@ -50,6 +50,10 @@ document.addEventListener('keydown', (e) => {
 });
 // Initialize: Show first conversation if exists
 window.addEventListener('load', () => {
+    const items = document.querySelectorAll('.conv-item');
+    if (items.length === 1) {
+        document.body.classList.add('single-conv');
+    }
     const firstItem = document.querySelector('.conv-item');
     if (firstItem) {
         showConversation(parseInt(firstItem.getAttribute('data-index')));
