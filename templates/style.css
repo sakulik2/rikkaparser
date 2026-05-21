@@ -25,7 +25,7 @@
     --user-text: #1e1b4b;
     --user-border: rgba(99, 102, 241, 0.15);
     
-    --assistant-bubble: rgba(255, 255, 255, 0.85);
+    --assistant-bubble: #ffffff;
     --assistant-text: #0f172a;
     --assistant-border: rgba(99, 102, 241, 0.08);
     
@@ -62,7 +62,7 @@
         --user-text: #ffffff;
         --user-border: rgba(255, 255, 255, 0.05);
         
-        --assistant-bubble: rgba(20, 27, 45, 0.6);
+        --assistant-bubble: #111827;
         --assistant-text: #f3f4f6;
         --assistant-border: rgba(99, 102, 241, 0.18);
         
@@ -83,7 +83,6 @@
     margin: 0; 
     padding: 0; 
     box-sizing: border-box; 
-    transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease;
 }
 
 body {
@@ -94,6 +93,7 @@ body {
     height: 100vh;
     overflow: hidden;
     letter-spacing: -0.011em;
+    transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 /* ==========================================================================
@@ -434,8 +434,6 @@ body.theme-dark .chatbox-badge {
     color: var(--assistant-text);
     border: 1px solid var(--assistant-border);
     border-radius: 20px 20px 20px 4px;
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
     max-width: 100%;
 }
 

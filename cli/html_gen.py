@@ -56,7 +56,7 @@ def _build_head(css: str) -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI 对话导出报告</title>
+<title>chatParser</title>
 <style>
 {css}
 </style>
@@ -126,7 +126,7 @@ def _build_main(conversations: list[Conversation], assistants: dict, memories: l
 
     # Welcome
     parts.append('<div class="welcome" id="welcome"><div class="welcome-inner">')
-    parts.append('<h1>💬 AI 对话导出报告</h1>')
+    parts.append('<h1>💬 chatParser</h1>')
     parts.append(f'<p>共 {len(conversations)} 条对话记录</p>')
     if memories:
         parts.append(f'<p>🧠 {len(memories)} 条 AI 记忆</p>')
