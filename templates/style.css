@@ -407,6 +407,21 @@ body {
 /* Annotation */
 .annotation { margin-top: 4px; font-size: 0.8rem; }
 .annotation a { color: var(--accent); }
+/* KaTeX Math Formulas */
+.katex-display {
+    overflow-x: auto;
+    overflow-y: hidden;
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+}
+.katex {
+    display: inline-block;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    vertical-align: middle;
+    -webkit-overflow-scrolling: touch;
+}
 /* Scrollbar */
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
