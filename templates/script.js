@@ -10,6 +10,10 @@ function showConversation(index) {
     if (view) {
         view.style.display = 'block';
         view.scrollTop = 0;
+        // Highlight code blocks with Prism.js
+        if (window.Prism) {
+            Prism.highlightAllUnder(view);
+        }
     }
     const items = document.querySelectorAll('.conv-item[data-index="' + index + '"]');
     items.forEach(el => el.classList.add('active'));
