@@ -1810,6 +1810,29 @@
                 return renderMath(src, block);
             });
         }
+        function normalizeLang(lang) {
+            if (!lang) return '';
+            lang = lang.toLowerCase().trim();
+            const mapping = {
+                'c++': 'cpp',
+                'csharp': 'csharp',
+                'c#': 'csharp',
+                'cs': 'csharp',
+                'js': 'javascript',
+                'ts': 'typescript',
+                'py': 'python',
+                'rs': 'rust',
+                'sh': 'bash',
+                'shell': 'bash',
+                'yml': 'yaml',
+                'xml': 'markup',
+                'html': 'markup',
+                'css': 'css',
+                'md': 'markdown'
+            };
+            return mapping[lang] || lang;
+        }
+
         function esc(s) {
             const div = document.createElement('div');
             div.textContent = s;
@@ -1871,7 +1894,7 @@
                 if (stripped.startsWith('```')) {
                     if (inTable) flushTable();
                     if (inCode) {
-                        result.push(`<pre><code class="lang-${esc(codeLang)}">${esc(codeLines.join('\n'))}</code></pre>`);
+                        result.push(`<pre><code class="language-${esc(normalizeLang(codeLang))}">${esc(codeLines.join('\n'))}</code></pre>`);
                         codeLines = [];
                         inCode = false;
                     } else {

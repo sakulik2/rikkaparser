@@ -9,6 +9,31 @@ import re
 from html import escape
 
 
+def normalize_lang(lang: str) -> str:
+    """标准化代码块语言名称，映射到 Prism.js 的官方别名和文件名。"""
+    if not lang:
+        return ""
+    lang = lang.lower().strip()
+    mapping = {
+        "c++": "cpp",
+        "csharp": "csharp",
+        "c#": "csharp",
+        "cs": "csharp",
+        "js": "javascript",
+        "ts": "typescript",
+        "py": "python",
+        "rs": "rust",
+        "sh": "bash",
+        "shell": "bash",
+        "yml": "yaml",
+        "xml": "markup",
+        "html": "markup",
+        "css": "css",
+        "md": "markdown",
+    }
+    return mapping.get(lang, lang)
+
+
 def inline_format(text: str) -> str:
     """处理行内 Markdown 格式，按正确优先级。"""
     # 1. 先提取行内代码，防止内部内容被格式化
@@ -86,7 +111,8 @@ def simple_markdown(text: str) -> str:
                 flush_table()
             if in_code_block:
                 code_content = escape("\n".join(code_lines))
-                result.append(f'<pre><code class="lang-{escape(code_lang)}">{code_content}</code></pre>')
+                normalized = normalize_lang(code_lang)
+                result.append(f'<pre><code class="language-{escape(normalized)}">{code_content}</code></pre>')
                 code_lines = []
                 in_code_block = False
             else:
