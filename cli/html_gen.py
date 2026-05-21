@@ -141,9 +141,7 @@ def _build_main(conversations: list[Conversation], assistants: dict, memories: l
         
         source_html = ""
         stype = conv.source_type
-        if stype == "gemini" and conv.source_url:
-            source_html = f'  ·  <a href="{escape(conv.source_url)}" target="_blank" style="color:var(--accent)">🔗 在 Gemini 中查看</a>'
-        elif stype == "openwebui" and conv.models:
+        if stype == "openwebui" and conv.models:
             source_html = f'  ·  🌐 {escape(", ".join(conv.models))}'
         elif stype == "chatbox":
             source_html = f'  ·  📦 Chatbox 数据'
