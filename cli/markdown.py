@@ -23,7 +23,7 @@ def inline_format(text: str) -> str:
     # 2. 图片（在链接之前，防止 ![...] 被链接匹配）
     text = re.sub(
         r'!\[([^\]]*)\]\(([^)]+)\)',
-        r'<img src="\2" alt="\1" style="max-width:360px;border-radius:6px">',
+        r'<img src="\2" alt="\1" style="max-width:100%;max-height:360px;border-radius:6px">',
         text,
     )
     # 3. 链接

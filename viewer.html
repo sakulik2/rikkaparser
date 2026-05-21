@@ -461,6 +461,7 @@
             background: var(--assistant-bg);
             border: 1px solid var(--border);
             border-radius: 18px 18px 18px 4px;
+            max-width: 100%;
         }
 
         .message.system .msg-body {
@@ -584,7 +585,7 @@
         }
 
         .part-image img {
-            max-width: 360px;
+            max-width: 100%;
             max-height: 360px;
             border-radius: 6px;
             margin: 6px 0;
@@ -774,6 +775,10 @@
 
             .message.user .msg-body {
                 max-width: 90%;
+            }
+
+            .message.assistant .msg-body {
+                max-width: 100%;
             }
         }
     </style>
@@ -1513,7 +1518,7 @@
             const codeSpans = [];
             text = text.replace(/`([^`]+)`/g, (_, c) => { codeSpans.push(c); return '\x00C' + (codeSpans.length - 1) + '\x00'; });
             // Images
-            text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width:360px;border-radius:6px">');
+            text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width:100%;max-height:360px;border-radius:6px">');
             // Links
             text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
             // Bold-italic

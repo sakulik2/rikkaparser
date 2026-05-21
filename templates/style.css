@@ -225,6 +225,7 @@ body {
     background: var(--assistant-bg);
     border: 1px solid var(--border);
     border-radius: 18px 18px 18px 4px;
+    max-width: 100%;
 }
 .message.system .msg-body {
     background: var(--system-bg);
@@ -299,7 +300,7 @@ body {
 .part-text a:hover { text-decoration: underline; }
 .md-li { padding: 1px 0; }
 .part-image img {
-    max-width: 360px;
+    max-width: 100%;
     max-height: 360px;
     border-radius: 6px;
     margin: 6px 0;
@@ -422,4 +423,10 @@ body {
     .sidebar.open { transform: translateX(0); }
     .menu-btn { display: block; }
     .conv-view { padding: 12px; padding-top: 44px; }
+    .message.user .msg-body {
+        max-width: 90%;
+    }
+    .message.assistant .msg-body {
+        max-width: 100%;
+    }
 }
